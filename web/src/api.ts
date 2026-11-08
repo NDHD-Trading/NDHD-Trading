@@ -174,6 +174,8 @@ export function useLiveData(settings: Settings, enabled = true, onAuthChange?: (
   onAuthChangeRef.current = onAuthChange;
   const [connected, setConnected] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  // Which tier reported the error, so that tier's next good message clears it.
+  const lastErrorTier = useRef<string | null>(null);
   const [data, setData] = useState<LiveData>(EMPTY);
   const [newAlerts, setNewAlerts] = useState<Alert[]>([]);
   const seenAlertKeys = useRef(new Set<string>());
@@ -196,9 +198,16 @@ export function useLiveData(settings: Settings, enabled = true, onAuthChange?: (
       }, retryDelay.current);
     }
 
+    function clearErrorFrom(tier: string) {
+      if (lastErrorTier.current !== tier) return;
+      lastErrorTier.current = null;
+      setLastError(null);
+    }
+
     function handle(msg: LiveMessage) {
       switch (msg.type) {
         case "tick": {
+          clearErrorFrom("fast");
           setData((prev) => ({
             ...prev,
             account: msg.account,
@@ -221,6 +230,7 @@ export function useLiveData(settings: Settings, enabled = true, onAuthChange?: (
           break;
         }
         case "strategy":
+          clearErrorFrom("strategy");
           setData((prev) => ({
             ...prev,
             stocks: msg.stocks,
@@ -237,6 +247,7 @@ export function useLiveData(settings: Settings, enabled = true, onAuthChange?: (
           });
           break;
         case "error":
+          lastErrorTier.current = msg.tier;
           setLastError(msg.message);
           break;
       }
@@ -256,6 +267,7 @@ export function useLiveData(settings: Settings, enabled = true, onAuthChange?: (
 
       socket.onopen = () => {
         setConnected(true);
+        lastErrorTier.current = null;
         setLastError(null);
         retryDelay.current = RECONNECT_MIN_MS;
       };

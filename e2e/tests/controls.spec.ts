@@ -137,16 +137,14 @@ test.describe("cancelling an order", () => {
     await expect(banner).toHaveCount(0);
   });
 
-  test("KNOWN BUG: the failure is on screen where you clicked", async ({ page, dashboard }) => {
-    // Open orders is far down the page and the banner is at the very top, so a
-    // failed cancel shows nothing unless you scroll up. Remove test.fail when fixed.
-    test.fail();
+  test("the failure is on screen where you clicked, and can be dismissed", async ({ page, dashboard }) => {
     await dashboard.mockWrite("**/api/orders/order-1/cancel", 400, { detail: "Already filled" });
     await dashboard.open();
     await dashboard.row("Open orders", "MSFT").getByRole("button", { name: "Cancel" }).click();
     const banner = page.locator(".banner.danger", { hasText: "Action failed" });
-    await expect(banner).toBeAttached();
     await expect(banner).toBeInViewport();
+    await banner.getByRole("button", { name: "Dismiss" }).click();
+    await expect(banner).toHaveCount(0);
   });
 });
 
@@ -261,32 +259,61 @@ test.describe("manual order", () => {
     await expect(banner).toContainText("RiskEngine.allow_stock_entry");
   });
 
-  test("KNOWN BUG: a failed submit is shown in the form", async ({ page, dashboard }) => {
-    // The error goes to the banner at the top of the page, far above and behind
-    // the form, so the click looks like it did nothing. Remove test.fail when fixed.
-    test.fail();
+  test("a failed submit is shown in the form", async ({ dashboard }) => {
     await dashboard.mockWrite(ORDERS, 502, { detail: "Broker down" });
     const { submit, confirm } = await openForm(dashboard);
     await dashboard.field("Symbol").fill("AAPL");
     await dashboard.field("Qty").fill("1");
     await confirm.check();
     await submit.click();
-    await expect(page.locator(".banner.danger", { hasText: "Action failed" })).toBeAttached();
-    await expect(dashboard.modal).toContainText("Broker down");
+    await expect(dashboard.modal.locator(".banner.danger")).toContainText("Broker down");
   });
 
   for (const qty of ["0", "-5", "0.5"]) {
-    test(`KNOWN BUG: a quantity of ${qty} can't be submitted`, async ({ dashboard }) => {
-      // The form only checks that Qty isn't empty. The API has no check either:
-      // it casts with int(), so 0.5 becomes 0. Remove test.fail when fixed.
-      test.fail();
+    test(`a quantity of ${qty} can't be submitted`, async ({ dashboard }) => {
       const { submit, confirm } = await openForm(dashboard);
       await dashboard.field("Symbol").fill("AAPL");
       await dashboard.field("Qty").fill(qty);
       await confirm.check();
       await expect(submit).toBeDisabled();
+      await expect(dashboard.modal).toContainText("whole number above 0");
     });
   }
+
+  test("a limit order needs a limit price above 0", async ({ dashboard }) => {
+    const { submit, confirm } = await openForm(dashboard);
+    await dashboard.field("Symbol").fill("AAPL");
+    await dashboard.field("Qty").fill("1");
+    await dashboard.field("Order type").selectOption("limit");
+    await confirm.check();
+    await expect(submit).toBeDisabled();
+    await dashboard.field("Limit price").fill("-1");
+    await expect(submit).toBeDisabled();
+    await dashboard.field("Limit price").fill("10");
+    await expect(submit).toBeEnabled();
+  });
+
+  test("an option order needs a limit price", async ({ dashboard }) => {
+    const { submit, confirm } = await openForm(dashboard);
+    await dashboard.field("Asset class").selectOption("option");
+    await dashboard.field("Symbol").fill("XYZ261218P00100000");
+    await dashboard.field("Qty").fill("1");
+    await confirm.check();
+    await expect(submit).toBeDisabled();
+    await dashboard.field("Limit price (required for options)").fill("2.5");
+    await expect(submit).toBeEnabled();
+  });
+
+  test("the symbol is tidied before it's sent", async ({ dashboard }) => {
+    const calls = await dashboard.mockWrite(ORDERS, 200, { accepted: true, order_id: "abc", status: "new", dry_run: false });
+    const { submit, confirm } = await openForm(dashboard);
+    await dashboard.field("Symbol").fill("  aapl ");
+    await dashboard.field("Qty").fill("1");
+    await confirm.check();
+    await submit.click();
+    await expect(dashboard.modal.locator(".banner")).toContainText("Order accepted");
+    expect(calls[0].postDataJSON().symbol).toBe("AAPL");
+  });
 
   test("Close sends nothing, and the form starts empty next time", async ({ page, dashboard }) => {
     const calls = await dashboard.mockWrite(ORDERS, 200, {});

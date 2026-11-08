@@ -165,6 +165,18 @@ button {
 
 .banner strong { display: block; margin-bottom: 2px; }
 
+.banner.action-error {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px));
+  margin: 0;
+  z-index: 35;
+  justify-content: space-between;
+  box-shadow: var(--shadow);
+}
+
 /* ------------------------------------------------------------------ hero */
 
 .hero {
@@ -494,9 +506,24 @@ footer.hint {
 }
 
 @media (max-width: 900px) {
-  .hero { grid-template-columns: 1fr; }
-  .grid-2 { grid-template-columns: 1fr; }
-  .grid-3 { grid-template-columns: 1fr 1fr; }
+  /* minmax(0, ...): a plain 1fr column grows to fit its widest table. */
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* A wide table scrolls inside its card; the page itself stays put. */
+  .card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
+/* Phones: the top bar wraps, so the kill switch is always on screen. */
+@media (max-width: 700px) {
+  .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .topbar-spacer { display: none; }
+  .badge { white-space: nowrap; }
+  .kill-switch-btn { margin-left: auto; }
+  .app-shell { padding: 0 12px 64px; }
+  .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .hero-equity { padding: 20px; }
+  .hero-equity .value { font-size: 32px; }
 }
 
 /* ------------------------------------------------------- congress trades */
