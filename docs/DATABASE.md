@@ -51,7 +51,9 @@ only cosmetic on top of that.
   Changing a password or disabling a user signs them out everywhere.
 - Throttling: 5 failed sign-ins for one username within 15 minutes blocks
   further attempts for that username until the window passes.
-- Every attempt is logged (`manage_users.py logins`).
+- Every attempt is logged (`manage_users.py logins`). Behind Tailscale Serve
+  the log shows the real address and the Tailscale user, taken from the
+  proxy's headers, which are only believed from localhost.
 - The cookie gets the `Secure` flag when the request arrived over HTTPS
   (directly or via `X-Forwarded-Proto`); force it with
   `SESSION_COOKIE_SECURE=true|false`.
@@ -78,8 +80,21 @@ only cosmetic on top of that.
 .\.venv\Scripts\python.exe scripts\manage_users.py logins
 ```
 
-Backup: `pg_dump -h 127.0.0.1 -U ndhd_app -Fc ndhd > ndhd.dump`
-(`C:\Program Files\PostgreSQL\17\bin\pg_dump.exe`).
+## Backups and clean-up
+
+`scripts\db_upkeep.py` backs up the database with `pg_dump` into `backups\`
+(git-ignored; it holds password hashes, so don't share it), keeps the newest
+14, and removes sessions that ended over 7 days ago and sign-in records over
+180 days old.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\db_upkeep.py                # both
+.\.venv\Scripts\python.exe scripts\db_upkeep.py --backup-only
+.\scripts\install-db-upkeep.ps1                                # nightly at 03:00; -Remove undoes it
+```
+
+To restore: `pg_restore -h 127.0.0.1 -U ndhd_app -d ndhd --clean --if-exists
+--no-owner <file>.dump`.
 
 ## The dashboard page
 
@@ -94,7 +109,8 @@ page's data.
 A server from before sign-in (no `/api/auth/me`, so 404) is treated as
 before: every section shown, the API key deciding.
 
-## Not done yet
+## On the server
 
-- The server setup script (`deploy/setup-server.sh`) doesn't install
-  PostgreSQL yet.
+`deploy/setup-server.sh` installs PostgreSQL and creates the role and database
+from `.env`. It hasn't been run on a real server yet. Copying user accounts
+across is in [SERVER.md](SERVER.md), step 6.

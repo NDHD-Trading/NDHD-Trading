@@ -35,16 +35,31 @@ def _secure_cookie(request: Request) -> bool:
     return proto == "https"
 
 
+def _client_details(request: Request) -> tuple[str, str]:
+    """(ip, user agent) for the sign-in log. Behind Tailscale Serve every
+    request arrives from localhost, so the proxy's headers say who it really
+    was. They are only believed from localhost: anything else could send them
+    itself. The dashboard binds to 127.0.0.1, so that's the proxy."""
+    ip = request.client.host if request.client else ""
+    agent = request.headers.get("user-agent", "")
+    if ip in ("127.0.0.1", "::1"):
+        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        ip = forwarded or ip
+        who = request.headers.get("tailscale-user-login", "").strip()
+        if who:
+            agent = f"tailscale:{who} {agent}"
+    return ip, agent
+
+
 @router.post("/login", response_model=MeOut)
 def login(body: LoginIn, request: Request, response: Response) -> MeOut:
     if not deps.users_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Sign-in isn't set up (DATABASE_URL is not set).")
-    ip = request.client.host if request.client else ""
+    ip, agent = _client_details(request)
     try:
         with db.session() as s:
-            token = auth.login(s, body.username, body.password, ip=ip,
-                               user_agent=request.headers.get("user-agent", ""))
+            token = auth.login(s, body.username, body.password, ip=ip, user_agent=agent)
             principal = auth.principal_for_token(s, token) if token else None
     except auth.LoginThrottled:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,

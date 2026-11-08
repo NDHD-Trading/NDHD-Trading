@@ -3,7 +3,7 @@
 # Reached from your devices through Tailscale Serve only; no public port.
 [Unit]
 Description=NDHD dashboard API (127.0.0.1:8000)
-After=network-online.target
+After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
