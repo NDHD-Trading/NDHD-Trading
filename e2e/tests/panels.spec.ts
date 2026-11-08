@@ -73,6 +73,11 @@ test.describe("congress panel", () => {
   test("a pull runs, reports progress and reloads the data", async ({ page, dashboard }) => {
     await dashboard.open();
     const panel = page.locator("#congress");
+    // Let the page's first status check finish, or it could read the "running"
+    // answer set up below and never show the idle button this test clicks.
+    await expect(panel.getByRole("button", { name: "Pull latest filings" })).toBeEnabled();
+    await expect.poll(() => dashboard.apiCalls).toContain("GET /api/congress/refresh");
+    await expect(panel.locator(".stat-card", { hasText: "Official rows" })).toContainText("12");
 
     let finished = false;
     const pulls = await dashboard.mockWrite("**/api/congress/refresh", 202, {
