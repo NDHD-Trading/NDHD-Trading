@@ -101,6 +101,18 @@ class EarningsFilterTest(unittest.TestCase):
         self.assertTrue(f.is_blackout("XYZ"))
         self.assertEqual(calls, ["XYZ"])
 
+    def test_just_reported_is_not_a_blackout(self):
+        recent = pe.date_today() - timedelta(days=30)
+        ticker = SimpleNamespace(calendar={"Earnings Date": [recent]})
+        with mock.patch("yfinance.Ticker", return_value=ticker):
+            self.assertFalse(pe.EarningsFilter(True, 7).is_blackout("XYZ"))
+
+    def test_old_report_with_nothing_newer_still_fails_closed(self):
+        old = pe.date_today() - timedelta(days=60)
+        ticker = SimpleNamespace(calendar={"Earnings Date": [old]})
+        with mock.patch("yfinance.Ticker", return_value=ticker):
+            self.assertTrue(pe.EarningsFilter(True, 7).is_blackout("XYZ"))
+
     def test_error_fails_closed(self):
         f, _ = self.make({"ERR": RuntimeError("boom")})
         self.assertTrue(f.is_blackout("ERR"))

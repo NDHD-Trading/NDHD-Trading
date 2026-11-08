@@ -153,5 +153,23 @@ class OptionRulesTest(unittest.TestCase):
         self.assertAlmostEqual(rules.max_loss_price(2.0, 200), 6.0)
 
 
+class NextEarningsAfterReportTest(unittest.TestCase):
+    TODAY = date(2026, 11, 9)
+
+    def test_recent_report_gives_a_date_well_ahead(self):
+        self.assertEqual(rules.next_earnings_after_report(date(2026, 10, 8), self.TODAY), date(2026, 12, 27))
+
+    def test_report_today_counts(self):
+        self.assertEqual(rules.next_earnings_after_report(self.TODAY, self.TODAY), date(2027, 1, 28))
+
+    def test_window_edge(self):
+        self.assertIsNotNone(rules.next_earnings_after_report(self.TODAY - timedelta(days=45), self.TODAY))
+        self.assertIsNone(rules.next_earnings_after_report(self.TODAY - timedelta(days=46), self.TODAY))
+
+    def test_nothing_listed_or_a_future_date_is_unknown(self):
+        self.assertIsNone(rules.next_earnings_after_report(None, self.TODAY))
+        self.assertIsNone(rules.next_earnings_after_report(self.TODAY + timedelta(days=3), self.TODAY))
+
+
 if __name__ == "__main__":
     unittest.main()

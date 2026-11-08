@@ -1401,13 +1401,11 @@ class AlpacaClient:
 # EARNINGS FILTER
 # =============================================================================
 
-def next_earnings_date(
+def listed_earnings_dates(
     calendar: Any,
-    today: date,
-) -> Optional[date]:
+) -> List[date]:
     """
-    The next earnings date on or after `today` from yfinance's
-    `Ticker.calendar`, or None if it lists none.
+    Every earnings date in yfinance's `Ticker.calendar`.
 
     yfinance used to return a DataFrame with an "Earnings Date" column; it
     now returns a dict ({"Earnings Date": [date, ...], ...}). Reading only
@@ -1427,7 +1425,7 @@ def next_earnings_date(
         raw = calendar["Earnings Date"].tolist()
 
     if raw is None:
-        return None
+        return []
 
     if not isinstance(raw, (list, tuple)):
         raw = [raw]
@@ -1447,10 +1445,18 @@ def next_earnings_date(
         except Exception:
             continue
 
-        if parsed >= today:
-            dates.append(parsed)
+        dates.append(parsed)
 
-    return min(dates) if dates else None
+    return dates
+
+
+def next_earnings_date(
+    calendar: Any,
+    today: date,
+) -> Optional[date]:
+    """The next earnings date on or after `today`, or None if none is listed."""
+    upcoming = [d for d in listed_earnings_dates(calendar) if d >= today]
+    return min(upcoming) if upcoming else None
 
 
 def ex_dividend_date(calendar: Any) -> Optional[date]:
@@ -1603,6 +1609,16 @@ class EarningsFilter:
                 calendar,
                 today,
             )
+
+            if next_date is None:
+                # Just reported: only the past date is listed until the next
+                # is announced. That isn't missing data, and blocking on it
+                # held a symbol out for weeks after every report.
+                listed = listed_earnings_dates(calendar)
+                next_date = rules.next_earnings_after_report(
+                    max(listed) if listed else None,
+                    today,
+                )
 
             if next_date is None:
                 LOGGER.warning(

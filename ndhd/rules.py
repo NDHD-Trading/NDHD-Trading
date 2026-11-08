@@ -275,6 +275,24 @@ def choose_option(
     )
 
 
+# Right after a report the data source may list only that past date. Large US
+# companies report about 91 days apart, so a report this recent means the next is
+# far off. Past this window the date counts as unknown again and the filter fails closed.
+EARNINGS_RECENT_REPORT_DAYS = 45
+EARNINGS_MIN_CYCLE_DAYS = 80
+
+
+def next_earnings_after_report(last_report: Optional[date], today: date) -> Optional[date]:
+    """The earliest plausible next earnings date if `last_report` was recent,
+    else None (unknown)."""
+    if last_report is None:
+        return None
+    days_since = (today - last_report).days
+    if not 0 <= days_since <= EARNINGS_RECENT_REPORT_DAYS:
+        return None
+    return last_report + timedelta(days=EARNINGS_MIN_CYCLE_DAYS)
+
+
 # Dividend payers on the Wheel pay quarterly. An estimated date is moved this
 # many days earlier, so a wrong guess leaves a call expiring before the real date.
 EX_DIVIDEND_CYCLE_DAYS = 91
