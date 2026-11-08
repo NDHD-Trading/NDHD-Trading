@@ -25,7 +25,6 @@ def cfg(**overrides):
         max_single_position_pct=10.0, max_total_stock_exposure_pct=40.0,
         stock_max_positions=3, max_daily_drawdown_pct=2.0,
         wheel_max_collateral_pct=25.0, wheel_max_total_collateral_pct=50.0,
-        pdt_protection=False,
     )
     base.update(overrides)
     return dataclasses.replace(pe.CONFIG, **base)
@@ -39,7 +38,7 @@ def option(sym, qty):
     return {"symbol": sym, "asset_class": "us_option", "qty": str(qty), "market_value": "0"}
 
 
-ACCOUNT = {"equity": "100000", "cash": "100000"}
+ACCOUNT = {"equity": "100000", "cash": "100000", "buying_power": "200000", "options_buying_power": "100000"}
 
 
 class TempStore:

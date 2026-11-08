@@ -31,7 +31,7 @@ test.describe("connection", () => {
     await dashboard.open();
     await expect(dashboard.topBar).toContainText("Live");
     dashboard.sockets[0].close();
-    // The PDT note shares the .reconnect style, so find this banner by its words.
+    // The buying power note shares the .reconnect style, so find this banner by its words.
     const banner = page.locator(".banner.reconnect", { hasText: "Live updates paused." });
     await expect(banner).toBeVisible();
     await expect(dashboard.topBar).toContainText("Reconnecting…");
@@ -139,7 +139,7 @@ test.describe("risk panel", () => {
     await expect(risk).toContainText("$1,600.00 / $60,000.00");
     await expect(risk).toContainText("1 / 8");
     await expect(risk).toContainText("technology");
-    await expect(risk).toContainText("PDT protection: active");
+    await expect(risk).toContainText("Buying power check: active");
   });
 
   test("colours a limit that's nearly used up", async ({ dashboard }) => {
@@ -148,12 +148,12 @@ test.describe("risk panel", () => {
     await expect(meter.locator(".meter-fill.danger")).toBeVisible();
   });
 
-  test("warns when PDT protection is degraded", async ({ dashboard }) => {
+  test("warns when the buying power check is degraded", async ({ dashboard }) => {
     await dashboard.open(undefined, {
-      messages: [strategyWith({ pdt_protection: { enabled_in_config: true, effective: false, note: "Fields missing." } })],
+      messages: [strategyWith({ buying_power_check: { effective: false, note: "Fields missing." } })],
     });
     const risk = dashboard.card("Risk & guardrails");
-    await expect(risk.locator(".banner.danger")).toContainText("PDT protection: degraded");
+    await expect(risk.locator(".banner.danger")).toContainText("Buying power check: degraded");
     await expect(risk.locator(".banner.danger")).toContainText("Fields missing.");
   });
 

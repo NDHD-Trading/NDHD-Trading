@@ -2,7 +2,7 @@
 
 A live-updating dashboard for the trading engine: account/positions/orders,
 per-symbol stock and Wheel strategy state with indicators, the portfolio
-risk panel (drawdown, exposure caps, sector caps, the PDT-protection status
+risk panel (drawdown, exposure caps, sector caps, the buying-power check
 finding from the ndhd-trading-investor skill), an alert feed with toast
 notifications, and manual controls (close a position, cancel an order,
 trigger the kill switch, submit a manual order) gated by the same

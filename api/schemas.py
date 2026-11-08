@@ -32,12 +32,6 @@ class AccountOut(BaseModel):
     # True when orders reach the broker (LIVE_TRADING, or PAPER_ORDERS on a
     # paper account); False means every order is a logged dry run.
     orders_enabled: bool
-    # Surfaces the ndhd-trading-investor skill's verified 2026-08-23
-    # finding directly: Alpaca removed the PDT fields from the Account
-    # API on 2026-07-06. If they're absent, PDT_PROTECTION in
-    # portfolio_engine.py is a silent no-op.
-    pdt_fields_present: bool
-    daytrade_count: Optional[int] = None
 
 
 class PositionOut(BaseModel):
@@ -130,8 +124,7 @@ class PortfolioStateOut(BaseModel):
 # Risk
 # ---------------------------------------------------------------------------
 
-class PdtProtectionStatus(BaseModel):
-    enabled_in_config: bool
+class BuyingPowerCheck(BaseModel):
     effective: bool
     note: str
 
@@ -152,7 +145,7 @@ class RiskStatusOut(BaseModel):
     stock_position_count: int
     stock_position_cap: int
     wheel_collateral_cap_pct: float
-    pdt_protection: PdtProtectionStatus
+    buying_power_check: BuyingPowerCheck
 
 
 # ---------------------------------------------------------------------------

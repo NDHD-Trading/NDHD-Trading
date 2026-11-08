@@ -238,7 +238,7 @@ def submit_manual_order(req: ManualOrderRequest) -> ManualOrderResponse:
                     accepted=False,
                     reason=(
                         "Rejected by RiskEngine.allow_stock_entry (position/"
-                        "exposure/sector/PDT limit, or daily drawdown halt)."
+                        "exposure/sector/buying power limit, or daily drawdown halt)."
                     ),
                     risk_check_passed=False,
                 )
@@ -334,7 +334,6 @@ ALLOWED_CONFIG_ENV_KEYS: Dict[str, str] = {
     "wheel_profit_target_pct": "WHEEL_PROFIT_TARGET_PCT",
     "poll_seconds": "POLL_SECONDS",
     "kill_switch_flatten": "KILL_SWITCH_FLATTEN",
-    "pdt_protection": "PDT_PROTECTION",
 }
 
 
