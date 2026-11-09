@@ -41,4 +41,4 @@ $kept += "DASHBOARD_API_KEY=$key"
 Set-Clipboard -Value $key
 
 Write-Host "Done: the key is saved in .env and copied to your clipboard (not shown here)." -ForegroundColor Green
-Write-Host "Next: restart the dashboard, then paste the key in the dashboard's Settings (gear icon, top right)."
+Write-Host "Next: restart the dashboard. Scripts send the key as an X-API-Key header. In the page, 'Use API key' on the sign-in screen takes it, for that tab only."

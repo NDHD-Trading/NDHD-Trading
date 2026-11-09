@@ -112,6 +112,25 @@ account as your PC and phone** (you). Then, in
 <https://login.tailscale.com/admin/machines>, open **ndhd-server > ⋯ >
 Disable key expiry** (you).
 
+The setup installs PostgreSQL and creates an empty `ndhd` database from
+`NDHD_DB_PASSWORD` and `DATABASE_URL` in `.env`. To bring your user accounts
+over, make a backup on the PC, copy it, and restore it on the server:
+
+```powershell
+# PC
+.\.venv\Scripts\python.exe scripts\db_upkeep.py --backup-only
+scp -i $HOME\.ssh\ndhd-server backups\<newest>.dump ubuntu@<server>:~/ndhd.dump
+```
+
+```bash
+# server, from the repo folder; it asks for NDHD_DB_PASSWORD
+pg_restore -h 127.0.0.1 -U ndhd_app -d ndhd --clean --if-exists --no-owner ~/ndhd.dump
+rm ~/ndhd.dump
+```
+
+`scripts/sync-to-server.ps1 -DotEnv` leaves `PG_ADMIN_PASSWORD` out of the copy
+it sends: the server never needs the PC's database superuser password.
+
 ### 7. Switch trading from the PC to the server (PC)
 
 Outside market hours:
@@ -134,9 +153,8 @@ sudo systemctl enable --now ndhd-engine
 
 ### 9. Use the new address everywhere (you)
 
-Open `https://ndhd-server.<your-tailnet>.ts.net/` on your phone and PC,
-and paste the API key in ⚙ Settings once on each (a new address means a new
-browser entry). The old PC address stops working, so nobody can press a
+Open `https://ndhd-server.<your-tailnet>.ts.net/` on your phone and PC, and
+sign in with your username and password. The old PC address stops working, so nobody can press a
 kill switch that no longer controls the engine.
 
 ### Optional: close SSH to the internet
