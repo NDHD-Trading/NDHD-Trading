@@ -12,8 +12,6 @@ export const account = {
   paper: true,
   live_trading: false,
   orders_enabled: true,
-  pdt_fields_present: true,
-  daytrade_count: 0,
 };
 
 export const stockPosition = {
@@ -98,7 +96,7 @@ export const risk = {
   stock_position_count: 1,
   stock_position_cap: 8,
   wheel_collateral_cap_pct: 50,
-  pdt_protection: { enabled_in_config: true, effective: true, note: "Fields present." },
+  buying_power_check: { effective: true, note: "Fields present." },
 };
 
 const indicators = {

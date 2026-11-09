@@ -93,5 +93,5 @@ Say "This PC no longer shares a dashboard over Tailscale." Green
 # --- 5. Start the server's engine.
 Say ""
 Say "Last step, on the server:  sudo systemctl enable --now ndhd-engine" Cyan
-Say "Then use $ServerUrl on every device (paste your API key in its Settings once)." Cyan
+Say "Then use $ServerUrl on every device, and sign in with your username and password." Cyan
 Say "To move back to this PC later: .\scripts\switch-to-server.ps1 -Undo" Gray

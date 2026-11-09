@@ -36,8 +36,8 @@ if (-not (Test-Path $Key)) { throw "SSH key not found: $Key" }
 $sshOpts = @('-i', $Key, '-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes')
 $target = "$User@$Server"
 
-function Copy-One($localRel, $remoteRel, [switch]$Private) {
-    $local = Join-Path $root $localRel
+function Copy-One($localRel, $remoteRel, [switch]$Private, [string]$From) {
+    $local = if ($From) { $From } else { Join-Path $root $localRel }
     if (-not (Test-Path $local)) { throw "Not found on this PC: $localRel" }
     & ssh @sshOpts $target "mkdir -p '$RemoteDir/$(Split-Path $remoteRel -Parent)'" | Out-Null
     & scp @sshOpts -q $local "${target}:$RemoteDir/$remoteRel"
@@ -46,7 +46,20 @@ function Copy-One($localRel, $remoteRel, [switch]$Private) {
     Write-Host "Copied $localRel -> ${Server}:$RemoteDir/$remoteRel" -ForegroundColor Green
 }
 
-if ($DotEnv) { Copy-One '.env' '.env' -Private }
+if ($DotEnv) {
+    # The server's dashboard needs NDHD_DB_PASSWORD, not the database superuser
+    # password, so that line stays on this PC.
+    $envFile = Join-Path $root '.env'
+    if (-not (Test-Path $envFile)) { throw "Not found on this PC: .env" }
+    $copy = New-TemporaryFile
+    try {
+        $lines = @(Get-Content -LiteralPath $envFile | Where-Object { $_ -notmatch '^\s*PG_ADMIN_PASSWORD\s*=' })
+        [IO.File]::WriteAllLines($copy.FullName, [string[]]$lines, (New-Object Text.UTF8Encoding($false)))
+        Copy-One '.env' '.env' -Private -From $copy.FullName
+    } finally {
+        Remove-Item -LiteralPath $copy.FullName -ErrorAction SilentlyContinue
+    }
+}
 if ($Snapshot) { Copy-One 'data\robinhood_snapshot.json' 'data/robinhood_snapshot.json' -Private }
 if ($State) {
     $stateFile = (& (Join-Path $root '.venv\Scripts\python.exe') -c "from dotenv import dotenv_values; print(dotenv_values(r'$root\.env').get('STATE_FILE') or 'portfolio_engine_state.json')").Trim()

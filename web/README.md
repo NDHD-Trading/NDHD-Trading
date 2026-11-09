@@ -2,7 +2,7 @@
 
 A live-updating dashboard for the trading engine: account/positions/orders,
 per-symbol stock and Wheel strategy state with indicators, the portfolio
-risk panel (drawdown, exposure caps, sector caps, the PDT-protection status
+risk panel (drawdown, exposure caps, sector caps, the buying-power check
 finding from the ndhd-trading-investor skill), an alert feed with toast
 notifications, and manual controls (close a position, cancel an order,
 trigger the kill switch, submit a manual order) gated by the same
@@ -55,10 +55,13 @@ the API logs a warning and the page stays blank.
 
 Then open **http://127.0.0.1:8000/** in a browser. Swagger is at `/docs`.
 
-If you set `DASHBOARD_API_KEY` in the environment the API process reads
-(see below), open the dashboard's ⚙ Settings panel and paste the same key
-in - it's stored in `localStorage` and sent as `X-API-Key` on every
-request and as a `?api_key=` query param on the WebSocket connection.
+With `DATABASE_URL` set, the page opens on a sign-in screen and your role
+decides what you see (see [docs/DATABASE.md](../docs/DATABASE.md)). "Use API
+key" on that screen takes `DASHBOARD_API_KEY` instead: full admin, kept only
+for that tab (`sessionStorage`), and sent as `X-API-Key` on every request and
+as a `?api_key=` query param on the WebSocket connection.
+
+Browser tests are in [`e2e/`](../e2e/README.md).
 
 ## Relevant environment variables (read by `api/main.py`)
 

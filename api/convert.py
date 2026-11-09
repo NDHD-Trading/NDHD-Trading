@@ -15,7 +15,7 @@ from .schemas import (
     AccountOut,
     AlertOut,
     OrderOut,
-    PdtProtectionStatus,
+    BuyingPowerCheck,
     PositionOut,
     RiskStatusOut,
     WheelQuote,
@@ -35,7 +35,6 @@ def as_float_or_none(value: Any) -> Optional[float]:
 
 def account_to_out(account: Dict[str, Any]) -> AccountOut:
     cfg = engine.CONFIG
-    raw_daytrade = account.get("daytrade_count")
     return AccountOut(
         status=str(account.get("status", "")),
         currency=str(account.get("currency", "USD")),
@@ -48,8 +47,6 @@ def account_to_out(account: Dict[str, Any]) -> AccountOut:
         paper=cfg.paper,
         live_trading=cfg.live_trading,
         orders_enabled=engine.orders_enabled(cfg),
-        pdt_fields_present=raw_daytrade is not None,
-        daytrade_count=engine.as_int(raw_daytrade) if raw_daytrade is not None else None,
     )
 
 
@@ -128,26 +125,28 @@ def wheel_quote_from_snapshot(snapshot: Optional[Dict[str, Any]]) -> Optional[Wh
     return WheelQuote(bid=bid, ask=ask, mid=round((bid + ask) / 2.0, 4))
 
 
-def pdt_protection_status(account: Dict[str, Any]) -> PdtProtectionStatus:
-    cfg = engine.CONFIG
-    fields_present = account.get("daytrade_count") is not None
-    effective = bool(cfg.pdt_protection) and fields_present
-    if not cfg.pdt_protection:
-        note = "PDT_PROTECTION is disabled in config."
-    elif fields_present:
-        note = "Alpaca is still returning daytrade_count; the guard is live."
-    else:
-        note = (
-            "PDT_PROTECTION is enabled but Alpaca no longer returns "
-            "daytrade_count (removed 2026-07-06 following FINRA's PDT "
-            "rule retirement). This guard is currently a silent no-op - "
-            "see the ndhd-trading-investor skill and migrate to the "
-            "Intraday Margin Framework (buying_power / IMD) instead."
+def buying_power_check(account: Dict[str, Any]) -> BuyingPowerCheck:
+    """RiskEngine fails closed on these fields; say so if they go missing."""
+    missing = [
+        field
+        for field in ("buying_power", "options_buying_power")
+        if account.get(field) is None
+    ]
+    if missing:
+        return BuyingPowerCheck(
+            effective=False,
+            note=(
+                f"Alpaca isn't sending {', '.join(missing)}, so new entries "
+                "that depend on it are being refused."
+            ),
         )
-    return PdtProtectionStatus(
-        enabled_in_config=bool(cfg.pdt_protection),
-        effective=effective,
-        note=note,
+    return BuyingPowerCheck(
+        effective=True,
+        note=(
+            "New stock entries must fit in buying power, and puts in options "
+            "buying power. This replaces the day-trade count, retired with "
+            "the PDT rule."
+        ),
     )
 
 
@@ -176,5 +175,5 @@ def risk_status_to_out(
         stock_position_count=risk.stock_position_count(positions),
         stock_position_cap=cfg.stock_max_positions,
         wheel_collateral_cap_pct=cfg.wheel_max_collateral_pct,
-        pdt_protection=pdt_protection_status(account),
+        buying_power_check=buying_power_check(account),
     )

@@ -31,8 +31,6 @@ export interface Account {
   paper: boolean;
   live_trading: boolean;
   orders_enabled: boolean;
-  pdt_fields_present: boolean;
-  daytrade_count: number | null;
 }
 
 export interface Position {
@@ -119,8 +117,7 @@ export interface WheelStrategy {
   unrealized_gain_pct: number | null;
 }
 
-export interface PdtProtection {
-  enabled_in_config: boolean;
+export interface BuyingPowerCheck {
   effective: boolean;
   note: string;
 }
@@ -141,7 +138,7 @@ export interface Risk {
   stock_position_count: number;
   stock_position_cap: number;
   wheel_collateral_cap_pct: number;
-  pdt_protection: PdtProtection;
+  buying_power_check: BuyingPowerCheck;
 }
 
 export interface LogEntry {

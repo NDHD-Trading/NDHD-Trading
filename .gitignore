@@ -77,6 +77,10 @@ portfolio_engine_state.json
 # Logs
 *.log
 
+# Database backups: they hold password hashes.
+backups/
+*.dump
+
 # Frontend tooling, if this ever grows an npm-based build step
 web/node_modules/
 web/dist/

@@ -190,8 +190,8 @@ In the browser you should see:
 - "Congress data: today" (or how old it is) in the top bar.
 
 If `DASHBOARD_API_KEY` is set, add `-Headers @{ "X-API-Key" = "<key>" }` to
-the `Invoke-WebRequest` calls, and paste the key into the dashboard's
-⚙ Settings.
+the `Invoke-WebRequest` calls. In the page, sign in with your username and
+password, or use "Use API key" on the sign-in screen (kept for that tab only).
 
 ## 4. Congress trade data
 
@@ -238,7 +238,7 @@ both vulnerability scans on every push.
 | Blank page | `web\dist\` not built. Run step 1.3. |
 | "Reconnecting…" banner | Backend not running or restarted. Start window 1; the page reconnects by itself. |
 | 503 "Alpaca credentials are not configured" | `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` missing from `.env`. Fix, then restart the backend. |
-| 401 "Missing or invalid X-API-Key" | `DASHBOARD_API_KEY` is set. Paste it into ⚙ Settings or send the header. |
+| 401 "Sign in, or send a valid X-API-Key header" | Sign in on the page, or send the `X-API-Key` header from a script. |
 | Port 8000 already in use | Another backend is running: `Get-NetTCPConnection -LocalPort 8000` shows its process. Stop it, or use `--port 8001`. |
 | Live engine console stays empty | The engine isn't running, or it writes a different `LOG_FILE` from the one the backend reads. |
 | "Engine advisory: Not running" | No heartbeat in the last few minutes. Start window 2. |

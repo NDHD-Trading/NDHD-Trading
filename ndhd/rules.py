@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 from .indicators import adx, atr, ema
@@ -192,13 +192,14 @@ def evaluate_contract(
     max_spread_pct: float,
     min_open_interest: int,
     minimum_strike: Optional[float] = None,
+    latest_expiration: Optional[date] = None,
 ) -> Optional[OptionCandidate]:
     """
     The contract as a candidate, or None if it fails a rule: tradable, has
-    a snapshot with a delta and a two-sided quote, DTE in range, out of the
-    money (and, for calls, strike above minimum_strike, i.e. the assignment
-    basis), bid >= min_bid, spread <= max_spread_pct of the midpoint, open
-    interest >= min_open_interest.
+    a snapshot with a delta and a two-sided quote, DTE in range, not after
+    latest_expiration, out of the money (and, for calls, strike above
+    minimum_strike, i.e. the assignment basis), bid >= min_bid, spread <=
+    max_spread_pct of the midpoint, open interest >= min_open_interest.
     """
     if not contract.get("tradable", False) or not snapshot:
         return None
@@ -209,6 +210,8 @@ def evaluate_contract(
         return None
     dte = (expiration - today).days
     if not (min_dte <= dte <= max_dte):
+        return None
+    if latest_expiration is not None and expiration > latest_expiration:
         return None
 
     strike = _num(contract.get("strike_price"))
@@ -270,6 +273,44 @@ def choose_option(
         key=lambda c: (abs(c.delta - target_delta), abs(c.dte - target_dte), c.spread_pct),
         default=None,
     )
+
+
+# Right after a report the data source may list only that past date. Large US
+# companies report about 91 days apart, so a report this recent means the next is
+# far off. Past this window the date counts as unknown again and the filter fails closed.
+EARNINGS_RECENT_REPORT_DAYS = 45
+EARNINGS_MIN_CYCLE_DAYS = 80
+
+
+def next_earnings_after_report(last_report: Optional[date], today: date) -> Optional[date]:
+    """The earliest plausible next earnings date if `last_report` was recent,
+    else None (unknown)."""
+    if last_report is None:
+        return None
+    days_since = (today - last_report).days
+    if not 0 <= days_since <= EARNINGS_RECENT_REPORT_DAYS:
+        return None
+    return last_report + timedelta(days=EARNINGS_MIN_CYCLE_DAYS)
+
+
+# Dividend payers on the Wheel pay quarterly. An estimated date is moved this
+# many days earlier, so a wrong guess leaves a call expiring before the real date.
+EX_DIVIDEND_CYCLE_DAYS = 91
+EX_DIVIDEND_ESTIMATE_MARGIN_DAYS = 10
+
+
+def next_ex_dividend(listed: Optional[date], today: date) -> Optional[date]:
+    """The next ex-dividend date from the one the data source lists, or None
+    if it lists none. A date in the past means the next isn't announced yet,
+    so it is estimated one quarter on, erring early."""
+    if listed is None:
+        return None
+    if listed >= today:
+        return listed
+    estimate = listed
+    while estimate < today:
+        estimate += timedelta(days=EX_DIVIDEND_CYCLE_DAYS)
+    return max(today, estimate - timedelta(days=EX_DIVIDEND_ESTIMATE_MARGIN_DAYS))
 
 
 def profit_target_price(entry_premium: float, profit_target_pct: float) -> float:

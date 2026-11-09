@@ -46,10 +46,53 @@ DEFAULT_UNIVERSE = [
     "JNJ", "PFE", "MRK", "ABBV", "UNH", "LLY", "BMY",
     "KO", "PEP", "PG", "WMT", "COST", "HD", "MCD", "NKE", "SBUX", "DIS", "TGT",
     "XOM", "CVX", "CAT", "GE", "RTX", "UPS", "T", "VZ",
+    "NEE", "DUK", "SO", "CEG", "WMB",
 ]
 
 MIN_MARKET_CAP = 50e9
 MIN_AVG_VOLUME = 2_000_000
+MIN_RETURN_ON_EQUITY = 0.08
+# yfinance reports debtToEquity as a percentage (150 means 1.5 times equity).
+MAX_CAPITAL_HEAVY_DEBT_TO_EQUITY = 250.0
+
+
+def is_capital_heavy(info: dict) -> bool:
+    """Utilities and pipelines: heavy building costs usually make free cash
+    flow negative even at healthy companies, so it can't judge them."""
+    industry = (info.get("industry") or "").lower()
+    return info.get("sector") == "Utilities" or "midstream" in industry or "pipeline" in industry
+
+
+def quality_problems(info: dict) -> tuple[list[str], list[str]]:
+    """(reasons it fails, notes that don't fail it) from yfinance's info."""
+    why = []
+    notes = []
+    if (info.get("marketCap") or 0) < MIN_MARKET_CAP:
+        why.append("market cap < $50B")
+    if (info.get("profitMargins") or 0) <= 0:
+        why.append("not profitable")
+    fcf = info.get("freeCashflow")
+    if info.get("sector") == "Financial Services":
+        # Free cash flow isn't a meaningful measure for banks and brokers
+        # (deposits and loans run through operating cash flow); judge them
+        # on return on equity instead.
+        if (info.get("returnOnEquity") or 0) <= MIN_RETURN_ON_EQUITY:
+            why.append("bank ROE <= 8%")
+    elif is_capital_heavy(info):
+        if (info.get("returnOnEquity") or 0) <= MIN_RETURN_ON_EQUITY:
+            why.append("ROE <= 8%")
+        debt = info.get("debtToEquity")
+        if debt is None:
+            why.append("debt unknown")
+        elif debt > MAX_CAPITAL_HEAVY_DEBT_TO_EQUITY:
+            why.append("debt/equity > 2.5")
+    elif fcf is None:
+        notes.append("free cash flow unknown")
+    elif fcf <= 0:
+        why.append("free cash flow <= 0")
+    if (info.get("averageVolume") or 0) < MIN_AVG_VOLUME:
+        why.append("avg volume < 2M")
+    return why, notes
 
 
 def quality(symbol: str) -> dict:
@@ -68,25 +111,7 @@ def quality(symbol: str) -> dict:
         "avg_volume_m": round((info.get("averageVolume") or 0) / 1e6, 1),
         "dividend_yield": info.get("dividendYield"),
     }
-    why = []
-    notes = []
-    if (info.get("marketCap") or 0) < MIN_MARKET_CAP:
-        why.append("market cap < $50B")
-    if (info.get("profitMargins") or 0) <= 0:
-        why.append("not profitable")
-    fcf = info.get("freeCashflow")
-    if info.get("sector") == "Financial Services":
-        # Free cash flow isn't a meaningful measure for banks and brokers
-        # (deposits and loans run through operating cash flow); judge them
-        # on return on equity instead.
-        if (info.get("returnOnEquity") or 0) <= 0.08:
-            why.append("bank ROE <= 8%")
-    elif fcf is None:
-        notes.append("free cash flow unknown")
-    elif fcf <= 0:
-        why.append("free cash flow <= 0")
-    if (info.get("averageVolume") or 0) < MIN_AVG_VOLUME:
-        why.append("avg volume < 2M")
+    why, notes = quality_problems(info)
     q["ok"] = not why
     q["why"] = "; ".join(why + notes)
     return q

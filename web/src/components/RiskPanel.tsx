@@ -69,12 +69,12 @@ export function RiskPanel({ risk }: { risk: Risk | null }) {
       )}
 
       <div
-        className={`banner ${risk.pdt_protection.effective ? "reconnect" : "danger"}`}
+        className={`banner ${risk.buying_power_check.effective ? "reconnect" : "danger"}`}
         style={{ marginTop: "16px", marginBottom: 0 }}
       >
         <div>
-          <strong>PDT protection: {risk.pdt_protection.effective ? "active" : "degraded"}</strong>
-          {risk.pdt_protection.note}
+          <strong>Buying power check: {risk.buying_power_check.effective ? "active" : "degraded"}</strong>
+          {risk.buying_power_check.note}
         </div>
       </div>
     </div>

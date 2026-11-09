@@ -85,9 +85,14 @@ The project is designed around three major components:
 
 ## Project Status
 
-This repository is intended to be developed incrementally.
+This repository is developed incrementally and runs on paper trading only.
+It holds the trading engine (`portfolio_engine.py`), its decisions as plain
+functions (`ndhd/`), a dashboard and control API with sign-in (`api/`, `web/`),
+read-only research panels (`congress_trades/`, `robinhood_view/`), and tests
+(`tests/`, `e2e/`). `alpaca_wheel_strategy.py` is an older single-ticker program
+that is due to be retired.
 
-The current implementation is a single Python execution engine containing:
+The engine contains:
 
 - Configuration management
 - Alpaca REST API integration
@@ -262,9 +267,12 @@ cd web; npm ci --ignore-scripts; npm run build; cd ..   # the UI is TypeScript; 
 uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/` for the dashboard, `/docs` for Swagger. See
-[web/README.md](web/README.md) for configuration (in particular,
-`DASHBOARD_API_KEY` for authentication) and what it can and can't do.
+Open `http://127.0.0.1:8000/` for the dashboard, `/docs` for Swagger. People
+sign in with a username and password, and their role decides what they see; see
+[docs/DATABASE.md](docs/DATABASE.md). `DASHBOARD_API_KEY` gives scripts full admin
+access. See [web/README.md](web/README.md) for configuration and what it can and
+can't do, and [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md) for private access from
+your phone.
 
 The dashboard also has a read-only **Robinhood** panel: a snapshot of your
 own Robinhood accounts compared with this engine's limits. It can't trade;
@@ -543,6 +551,12 @@ The implementation contains several safeguards:
 - Daily risk halts prevent new entries.
 - Existing stock stops are protected from being loosened.
 - Covered-call strikes must be above assignment basis.
+- Covered calls must expire before the next ex-dividend date (`WHEEL_DIVIDEND_CHECK`).
+- New entries must fit buying power, and fail closed if the broker stops sending it.
+- An opening option order is saved before it is sent, so a restart settles it instead of selling a second one.
+- A short option the record doesn't know about pauses that symbol and raises an alert.
+- A kill switch flattens positions and blocks new entries during a cooldown.
+- The dashboard needs a sign-in, and viewers get no controls.
 - Earnings data failures fail closed.
 - API rate limiting is handled with backoff.
 - API requests use retry logic.
@@ -707,21 +721,18 @@ Consider:
 
 ### Trading Safety
 
-Consider implementing additional controls such as:
+Already in place: the kill switch (also the manual emergency shutdown),
+startup reconciliation with the broker, total Wheel collateral and sector caps,
+and alerts when local state and the broker disagree.
+
+Consider adding controls such as:
 
 - Maximum total portfolio loss
-- Maximum option assignment exposure
-- Maximum number of Wheel contracts
-- Maximum symbol concentration
 - Maximum order value
 - Maximum order frequency
 - Stale-data detection
 - Quote-age checks
 - Market-wide circuit-breaker handling
-- Manual emergency shutdown
-- Kill switch
-- Independent position reconciliation
-- Alerts when local state and broker state disagree
 
 ## Secrets and Security
 
@@ -772,9 +783,10 @@ Potential future improvements:
 - [ ] Add structured trade/order audit logs
 - [ ] Add persistent database-backed state
 - [ ] Add application health monitoring
-- [ ] Add alerting
-- [ ] Add emergency kill switch
-- [ ] Add stronger broker/local-state reconciliation
+- [x] Add alerting
+- [x] Add emergency kill switch
+- [x] Add stronger broker/local-state reconciliation
+- [x] Add browser tests of the dashboard
 - [ ] Add automated deployment
 - [ ] Add backtesting framework
 - [ ] Add performance analytics

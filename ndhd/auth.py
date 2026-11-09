@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import db
@@ -27,6 +27,9 @@ SESSION_HOURS = float(os.getenv("SESSION_HOURS", "12"))
 # further attempts are refused until it passes.
 MAX_FAILED_LOGINS = 5
 FAILED_LOGIN_WINDOW = timedelta(minutes=15)
+# Kept for the audit trail this long, then removed by scripts/db_upkeep.py.
+SESSION_GRACE = timedelta(days=7)
+LOGIN_EVENT_RETENTION = timedelta(days=180)
 
 
 def _b64(raw: bytes) -> str:
@@ -143,6 +146,24 @@ def logout(s: Session, token: str) -> None:
     if row is not None:
         row.revoked = True
         s.commit()
+
+
+def prune(s: Session, now=None) -> tuple[int, int]:
+    """Delete sessions that ended over SESSION_GRACE ago and sign-in records
+    older than LOGIN_EVENT_RETENTION. Returns (sessions, events) removed."""
+    now = now or db.utcnow()
+    cutoff = now - SESSION_GRACE
+    sessions = s.execute(
+        delete(db.LoginSession).where(
+            or_(db.LoginSession.expires_at < cutoff,
+                and_(db.LoginSession.revoked.is_(True), db.LoginSession.created_at < cutoff))
+        )
+    ).rowcount
+    events = s.execute(
+        delete(db.LoginEvent).where(db.LoginEvent.at < now - LOGIN_EVENT_RETENTION)
+    ).rowcount
+    s.commit()
+    return sessions, events
 
 
 def revoke_user_sessions(s: Session, user: db.User) -> int:

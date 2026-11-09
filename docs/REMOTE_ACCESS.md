@@ -61,10 +61,10 @@ clipboard, and never shows it on screen. If a key already exists it changes
 nothing; `-Replace` makes a new one (do that if a device is lost).
 
 Restart the dashboard so it reads the key (Ctrl+C in its window, then
-`.\scripts\start-ndhd.ps1`). Then, **on every browser you use, including this
-PC's**: open ⚙ Settings in the dashboard and paste the key from `.env`.
-Without it, buttons such as the kill switch answer "401 Missing or invalid
-X-API-Key".
+`.\scripts\start-ndhd.ps1`). The page then asks everyone to sign in with a
+username and password (create accounts with `scripts\manage_users.py`, see
+[DATABASE.md](DATABASE.md)). The key itself is for scripts, or for "Use API
+key" on the sign-in screen, which keeps it for that tab only.
 
 ### 3. Start everything
 
@@ -85,7 +85,7 @@ Laptop and phone:    https://my-pc.tailabc.ts.net/
 1. Install Tailscale: Windows/Mac from <https://tailscale.com/download>,
    phones from the App Store or Google Play.
 2. Sign in with **the same account** as step 1.
-3. Open the private link from step 3, then ⚙ Settings, paste the API key.
+3. Open the private link from step 3 and sign in.
    On a phone, "Add to Home Screen" makes it an app-like icon.
 
 That's it. The kill switch is the pink button at the top right.
@@ -121,5 +121,5 @@ That's it. The kill switch is the pink button at the top right.
 | Start script: "skipped. Set DASHBOARD_API_KEY" | Step 2 |
 | Phone: page doesn't load | Tailscale app on the phone is connected (toggle on)? PC awake? |
 | "HTTPS certificates are disabled" | Admin console > DNS > enable HTTPS, then run the script again |
-| Buttons say 401 | Paste the API key in ⚙ Settings on that device |
+| Back at the sign-in screen, or buttons say 401 | Your sign-in ended: sign in again (sessions last `SESSION_HOURS`, 12 by default) |
 | PC goes to sleep | Windows Settings > Power: set sleep to Never while NDHD runs, or use [SERVER.md](SERVER.md) |

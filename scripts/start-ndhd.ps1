@@ -185,6 +185,6 @@ if (-not $NoTailscale) {
 # --- 5. Summary
 Say ""
 Say "On this PC:          $local" Cyan
-if ($phoneUrl) { Say "Laptop and phone:    $phoneUrl   (first time on a device: paste your API key in Settings)" Cyan }
+if ($phoneUrl) { Say "Laptop and phone:    $phoneUrl   (sign in with your username and password)" Cyan }
 Say "Stop a part: open its 'NDHD dashboard' or 'NDHD engine' window and press Ctrl+C."
 if (-not $NoBrowser) { Start-Process $local }

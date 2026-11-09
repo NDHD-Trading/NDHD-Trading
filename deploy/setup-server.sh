@@ -30,11 +30,11 @@ die() { printf 'Stopped: %s\n' "$*" >&2; exit 1; }
 [[ -f .env ]] || die "copy your .env into $REPO first (paper keys, DASHBOARD_API_KEY). See docs/SERVER.md."
 [[ "$(uname -s)" == "Linux" ]] || die "this script is for a Linux server."
 
-step "1/6 System packages"
+step "1/7 System packages"
 sudo apt-get update -y
 sudo apt-get install -y ca-certificates curl git python3-venv xz-utils
 
-step "2/6 Python 3.14 and the hashed Linux lock (requirements.lock.linux.txt)"
+step "2/7 Python 3.14 and the hashed Linux lock (requirements.lock.linux.txt)"
 [[ -x .venv-tools/bin/uv ]] || { python3 -m venv .venv-tools && .venv-tools/bin/pip install --disable-pip-version-check "uv==$UV_VERSION"; }
 .venv-tools/bin/uv python install 3.14
 [[ -x .venv/bin/python ]] || .venv-tools/bin/uv venv --python 3.14 .venv
@@ -52,7 +52,19 @@ else
 fi
 echo "Safety check: paper account only, live trading off, API key set. $ORDERS_NOTE."
 
-step "3/6 Build the dashboard (Node $NODE_VERSION, checksum-verified)"
+step "3/7 PostgreSQL for dashboard sign-in (localhost only)"
+if grep -Eq '^[[:space:]]*DATABASE_URL=' .env; then
+  sudo apt-get install -y postgresql
+  sudo systemctl enable --now postgresql
+  # The SQL comes through a pipe, so the password never appears on a command line.
+  .venv/bin/python scripts/pg_bootstrap_sql.py | sudo -u postgres psql -v ON_ERROR_STOP=1 -q
+  .venv/bin/python -m alembic upgrade head
+  echo "Database ready. To bring your user accounts over, see docs/SERVER.md, step 6."
+else
+  echo "DATABASE_URL isn't set in .env: skipping PostgreSQL. The dashboard will use the API key only."
+fi
+
+step "4/7 Build the dashboard (Node $NODE_VERSION, checksum-verified)"
 case "$(uname -m)" in
   aarch64|arm64) node_arch=arm64 ;;
   x86_64) node_arch=x64 ;;
@@ -69,12 +81,12 @@ if ! .tools/node/bin/node --version 2>/dev/null | grep -qx "$NODE_VERSION"; then
 fi
 (cd web && PATH="$REPO/.tools/node/bin:$PATH" npm ci --ignore-scripts --no-fund && PATH="$REPO/.tools/node/bin:$PATH" npm run build)
 
-step "4/6 Tests"
+step "5/7 Tests"
 .venv/bin/python -m unittest discover -s congress_trades -t .
 .venv/bin/python -m unittest discover -s robinhood_view -t .
 .venv/bin/python -m unittest discover -s tests -t .
 
-step "5/6 Services that restart on crash and on reboot"
+step "6/7 Services that restart on crash and on reboot"
 install_unit() {
   sed -e "s|@REPO@|$REPO|g" -e "s|@USER@|$RUN_USER|g" "deploy/$1" | sudo tee "/etc/systemd/system/$1" >/dev/null
 }
@@ -92,7 +104,7 @@ fi
 for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS http://127.0.0.1:8000/api/health >/dev/null || die "the dashboard did not start: sudo journalctl -u ndhd-api -n 50"
 
-step "6/6 Private access with Tailscale (tailnet only)"
+step "7/7 Private access with Tailscale (tailnet only)"
 if ! command -v tailscale >/dev/null; then
   . /etc/os-release
   curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.noarmor.gpg" \

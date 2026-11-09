@@ -330,10 +330,9 @@ class Config:
     lock_file: str = os.getenv("LOCK_FILE", "portfolio_engine.lock")
     reconcile_on_startup: bool = env_bool("RECONCILE_ON_STARTUP", True)
 
-    # PDT protection (Issue #8)
-    pdt_protection: bool = env_bool("PDT_PROTECTION", True)
-    pdt_equity_threshold: float = env_float("PDT_EQUITY_THRESHOLD", 25000.0)
-    pdt_max_day_trades: int = env_int("PDT_MAX_DAY_TRADES", 3)
+    # Never hold a short call across an ex-dividend date: early assignment
+    # risk peaks just before it (WheelStrategy.open_covered_call).
+    wheel_dividend_check: bool = env_bool("WHEEL_DIVIDEND_CHECK", True)
 
     # Wash-sale awareness (informational only) (Issue #9)
     wash_sale_window_days: int = env_int("WASH_SALE_WINDOW_DAYS", 30)
@@ -531,6 +530,12 @@ class WheelState:
     expected_shares: int = 0
 
     last_order_id: Optional[str] = None
+
+    # client_order_id of an opening order, saved BEFORE it is sent and cleared
+    # once its outcome is known. If the engine stops in between, the next run
+    # looks it up (WheelStrategy.recover_pending_order) instead of selling
+    # a second option.
+    pending_client_order_id: Optional[str] = None
 
     # ISO date before which no new put is sold, set when the max-loss stop
     # closes one (don't re-sell straight into a falling stock).
@@ -1396,13 +1401,11 @@ class AlpacaClient:
 # EARNINGS FILTER
 # =============================================================================
 
-def next_earnings_date(
+def listed_earnings_dates(
     calendar: Any,
-    today: date,
-) -> Optional[date]:
+) -> List[date]:
     """
-    The next earnings date on or after `today` from yfinance's
-    `Ticker.calendar`, or None if it lists none.
+    Every earnings date in yfinance's `Ticker.calendar`.
 
     yfinance used to return a DataFrame with an "Earnings Date" column; it
     now returns a dict ({"Earnings Date": [date, ...], ...}). Reading only
@@ -1422,7 +1425,7 @@ def next_earnings_date(
         raw = calendar["Earnings Date"].tolist()
 
     if raw is None:
-        return None
+        return []
 
     if not isinstance(raw, (list, tuple)):
         raw = [raw]
@@ -1442,10 +1445,34 @@ def next_earnings_date(
         except Exception:
             continue
 
-        if parsed >= today:
-            dates.append(parsed)
+        dates.append(parsed)
 
-    return min(dates) if dates else None
+    return dates
+
+
+def next_earnings_date(
+    calendar: Any,
+    today: date,
+) -> Optional[date]:
+    """The next earnings date on or after `today`, or None if none is listed."""
+    upcoming = [d for d in listed_earnings_dates(calendar) if d >= today]
+    return min(upcoming) if upcoming else None
+
+
+def ex_dividend_date(calendar: Any) -> Optional[date]:
+    """The "Ex-Dividend Date" from yfinance's Ticker.calendar dict, or None
+    if it lists none (a company that pays no dividend). The date can be in
+    the past when the next one isn't announced; rules.next_ex_dividend
+    handles that."""
+    if not isinstance(calendar, dict):
+        return None
+    value = calendar.get("Ex-Dividend Date")
+    if value is None:
+        return None
+    try:
+        return value.date() if hasattr(value, "date") else date.fromisoformat(str(value))
+    except Exception:
+        return None
 
 
 class EarningsFilter:
@@ -1478,6 +1505,9 @@ class EarningsFilter:
         # symbol -> (day looked up, next earnings date); one lookup a day.
         self._known: Dict[str, Tuple[date, date]] = {}
         self._retry_after: Dict[str, float] = {}
+        # symbol -> (day looked up, next ex-dividend date or None).
+        self._ex_known: Dict[str, Tuple[date, Optional[date]]] = {}
+        self._ex_retry_after: Dict[str, float] = {}
 
     def _note_failure(self, symbol: str, exc: Exception) -> None:
         count = self._consecutive_failures.get(symbol, 0) + 1
@@ -1505,6 +1535,41 @@ class EarningsFilter:
 
     def _note_success(self, symbol: str) -> None:
         self._consecutive_failures[symbol] = 0
+
+    def next_ex_dividend(
+        self,
+        symbol: str,
+    ) -> Tuple[bool, Optional[date]]:
+        """(lookup worked, next ex-dividend date). (True, None) means no
+        dividend is listed; (False, None) means the data couldn't be read,
+        and callers fail closed. One lookup a day per symbol, from the same
+        yfinance calendar as the earnings dates."""
+        today = date_today()
+
+        known = self._ex_known.get(symbol)
+        if known and known[0] == today:
+            return True, known[1]
+
+        if time.time() < self._ex_retry_after.get(symbol, 0.0):
+            return False, None
+
+        try:
+            import yfinance as yf
+
+            calendar = yf.Ticker(symbol).calendar
+            # An empty answer is a failed lookup, not "pays no dividend".
+            if not isinstance(calendar, dict) or not calendar:
+                raise RuntimeError("empty calendar")
+        except Exception as exc:
+            LOGGER.warning(
+                "Could not read the ex-dividend date for %s: %s", symbol, exc
+            )
+            self._ex_retry_after[symbol] = time.time() + self.RETRY_SECONDS
+            return False, None
+
+        next_ex = rules.next_ex_dividend(ex_dividend_date(calendar), today)
+        self._ex_known[symbol] = (today, next_ex)
+        return True, next_ex
 
     def is_blackout(
         self,
@@ -1544,6 +1609,16 @@ class EarningsFilter:
                 calendar,
                 today,
             )
+
+            if next_date is None:
+                # Just reported: only the past date is listed until the next
+                # is announced. That isn't missing data, and blocking on it
+                # held a symbol out for weeks after every report.
+                listed = listed_earnings_dates(calendar)
+                next_date = rules.next_earnings_after_report(
+                    max(listed) if listed else None,
+                    today,
+                )
 
             if next_date is None:
                 LOGGER.warning(
@@ -1891,27 +1966,32 @@ class RiskEngine:
                 return False
 
         # -----------------------------------------------------------
-        # PDT protection (Issue #8): a stock strategy that enters and
-        # exits within the same session can trip the Pattern Day
-        # Trader rule on accounts under $25k, resulting in a trading
-        # restriction from the broker. This is a soft guard, not a
-        # full day-trade simulator - it blocks new entries once the
-        # account is close to the day-trade limit reported by Alpaca.
+        # FINRA retired the Pattern Day Trader rule (Regulatory Notice
+        # 26-10, effective 2026-06-04) and Alpaca removed daytrade_count
+        # from the account on 2026-07-06, so the old day-trade counter
+        # could never block anything. Under the intraday margin rule that
+        # replaced it, buying power is the real-time limit. Fail closed if
+        # the broker ever stops sending it: a guard reading a missing field
+        # must not quietly pass.
         # -----------------------------------------------------------
 
-        if self.config.pdt_protection and equity < self.config.pdt_equity_threshold:
-            day_trade_count = as_int(account.get("daytrade_count"))
-            if day_trade_count >= self.config.pdt_max_day_trades:
-                LOGGER.warning(
-                    "%s entry rejected: PDT protection - "
-                    "%d day trades already used on a $%.0f account "
-                    "(< $%.0f PDT threshold).",
-                    symbol,
-                    day_trade_count,
-                    equity,
-                    self.config.pdt_equity_threshold,
-                )
-                return False
+        raw_buying_power = account.get("buying_power")
+        if raw_buying_power is None:
+            LOGGER.warning(
+                "%s entry rejected: the account has no buying_power field.",
+                symbol,
+            )
+            return False
+
+        buying_power = as_float(raw_buying_power)
+        if notional > buying_power:
+            LOGGER.info(
+                "%s entry rejected: notional %.2f > buying power %.2f",
+                symbol,
+                notional,
+                buying_power,
+            )
+            return False
 
         return True
 
@@ -1941,17 +2021,30 @@ class RiskEngine:
         if cash <= 0 or equity <= 0:
             return False
 
+        # `cash` still counts money already held against open short puts;
+        # options_buying_power is cash minus that collateral (checked on the
+        # paper account). Use the smaller, and fail closed if the broker
+        # stops sending it.
+        raw_options_bp = account.get("options_buying_power")
+        if raw_options_bp is None:
+            LOGGER.warning(
+                "Wheel rejected: the account has no options_buying_power field."
+            )
+            return False
+
+        available = min(cash, as_float(raw_options_bp))
+
         max_collateral = (
             equity
             * self.config.wheel_max_collateral_pct
             / 100.0
         )
 
-        if collateral > cash:
+        if collateral > available:
             LOGGER.info(
-                "Wheel rejected: collateral %.2f > cash %.2f",
+                "Wheel rejected: collateral %.2f > available %.2f",
                 collateral,
-                cash,
+                available,
             )
             return False
 
@@ -2557,10 +2650,9 @@ class StockStrategy:
             return
 
         # ---------------------------------------------------------------
-        # Idempotent, deterministic client_order_id (Issue #7): persist
-        # BEFORE submitting so a crash between "order sent" and "state
-        # saved" can be recovered by looking the order up instead of
-        # blindly resubmitting on the next poll.
+        # Persist the intent BEFORE submitting (Issue #7). A crash after this
+        # can't double the entry: process_symbol sees the position or the
+        # working "stock-entry-" order first, and otherwise resets the record.
         # ---------------------------------------------------------------
 
         client_order_id = (
@@ -3249,6 +3341,7 @@ class WheelStrategy:
         option_type: str,
         underlying_price: float,
         minimum_strike: Optional[float] = None,
+        latest_expiration: Optional[date] = None,
     ) -> OptionCandidate:
 
         today = date_today()
@@ -3300,6 +3393,7 @@ class WheelStrategy:
                     max_spread_pct=self.config.wheel_max_option_spread_pct,
                     min_open_interest=self.config.wheel_min_open_interest,
                     minimum_strike=minimum_strike,
+                    latest_expiration=latest_expiration,
                 )
             )
         ]
@@ -3355,6 +3449,12 @@ class WheelStrategy:
                 "rejected",
                 "expired",
             }:
+                LOGGER.info(
+                    "Wheel order %s (%s) ended unfilled: %s.",
+                    order_id,
+                    order.get("symbol", ""),
+                    status,
+                )
                 return None
 
             time.sleep(2)
@@ -3363,12 +3463,131 @@ class WheelStrategy:
             self.api.cancel_order(
                 order_id
             )
+            LOGGER.info(
+                "Wheel order %s not filled in %d s; cancelled.",
+                order_id,
+                self.config.order_timeout_seconds,
+            )
         except Exception as exc:
             LOGGER.warning(
                 "Could not cancel option order: %s",
                 exc,
             )
 
+        return None
+
+    def record_opened_option(
+        self,
+        state: WheelState,
+        order: Dict[str, Any],
+        fallback_premium: float = 0.0,
+    ) -> float:
+        """Save a filled opening order as the open leg; returns the premium."""
+        option_symbol = str(order.get("symbol", ""))
+        parsed = parse_occ(option_symbol)
+        option_type = parsed[1] if parsed else None
+        premium = as_float(order.get("filled_avg_price"), fallback_premium)
+
+        state.option_symbol = option_symbol
+        state.option_type = option_type
+        state.entry_premium = premium
+        state.contracts = 1
+        state.last_order_id = str(order.get("id", ""))
+        state.pending_client_order_id = None
+
+        if option_type == "call":
+            state.phase = "COVERED_CALL"
+            state.expected_shares = self.config.wheel_contract_size
+        else:
+            state.phase = "CASH_PUT"
+            state.assignment_basis = None
+            state.expected_shares = 0
+
+        self.store.save(self.state)
+        return premium
+
+    def recover_pending_order(
+        self,
+        symbol: str,
+    ) -> bool:
+        """Settle an opening order whose outcome this process didn't see,
+        either because it stopped while the order was working or because
+        the order timed out. True means open nothing new this cycle."""
+        state = self.get_state(symbol)
+        client_id = state.pending_client_order_id
+
+        if not client_id:
+            return False
+
+        order = self.api.get_order_by_client_id(client_id)
+
+        if order is None:
+            # The lookup also returns None on an API error, so ask a second
+            # way: this raises during an outage, which keeps the record.
+            for candidate in self.api.get_orders(status="open"):
+                if candidate.get("client_order_id") == client_id:
+                    order = candidate
+                    break
+
+        if order is None:
+            # It never reached the broker.
+            LOGGER.info("Wheel %s: order %s was never placed.", symbol, client_id)
+            state.pending_client_order_id = None
+            self.store.save(self.state)
+            return False
+
+        status = str(order.get("status", "")).lower()
+
+        if status == "filled":
+            premium = self.record_opened_option(state, order)
+            LOGGER.warning(
+                "Wheel %s: recovered filled order %s: %s premium=%.2f.",
+                symbol,
+                client_id,
+                state.option_symbol,
+                premium,
+            )
+            self.alerter.send(
+                subject=f"Wheel order recovered for {symbol}",
+                body=(
+                    f"Order {client_id} filled while the engine wasn't watching "
+                    f"it. {state.option_symbol} is now tracked as the open leg."
+                ),
+                key=f"wheel-recovered-{symbol}",
+            )
+            return True
+
+        if status in {"canceled", "rejected", "expired"}:
+            LOGGER.info("Wheel %s: order %s ended %s.", symbol, client_id, status)
+            state.pending_client_order_id = None
+            self.store.save(self.state)
+            return False
+
+        # Still working with nobody watching it. Cancel, and check again next
+        # cycle: it may fill first, which the "filled" branch then records.
+        LOGGER.warning(
+            "Wheel %s: order %s is still %s; cancelling it.", symbol, client_id, status
+        )
+        try:
+            self.api.cancel_order(str(order.get("id", "")))
+        except Exception as exc:
+            LOGGER.warning("Could not cancel option order: %s", exc)
+        return True
+
+    def unknown_short_option(
+        self,
+        positions: List[Dict[str, Any]],
+        symbol: str,
+    ) -> Optional[str]:
+        """A short option on this underlying that the record doesn't know
+        about. Never adopted: selling another on top is worse than pausing."""
+        for position in positions:
+            if is_equity_position(position) or position_qty(position) >= 0:
+                continue
+            option_symbol = str(position.get("symbol", ""))
+            parsed = parse_occ(option_symbol)
+            if parsed and parsed[0] == symbol:
+                return option_symbol
         return None
 
     def open_csp(
@@ -3431,16 +3650,17 @@ class WheelStrategy:
             candidate.midpoint
         )
 
+        client_order_id = f"wheel-csp-{symbol}-{int(time.time())}"
+        state.pending_client_order_id = client_order_id
+        self.store.save(self.state)
+
         order = self.api.submit_option_order(
             symbol=candidate.symbol,
             qty=1,
             side="sell",
             position_intent="sell_to_open",
             limit_price=limit_price,
-            client_order_id=(
-                f"wheel-csp-{symbol}-"
-                f"{int(time.time())}"
-            ),
+            client_order_id=client_order_id,
         )
 
         order_id = str(
@@ -3448,6 +3668,8 @@ class WheelStrategy:
         )
 
         if order.get("status") == "dry_run":
+            state.pending_client_order_id = None
+            self.store.save(self.state)
             # Nothing was sent: log it, record nothing as open.
             LOGGER.warning(
                 "DRY RUN: would sell put %s strike=%.2f DTE=%d "
@@ -3465,29 +3687,14 @@ class WheelStrategy:
         )
 
         if not filled:
+            # The record stays pending: recover_pending_order settles it next
+            # cycle, including a fill that races the cancel.
             return
 
-        avg = as_float(
-            filled.get(
-                "filled_avg_price"
-            ),
+        avg = self.record_opened_option(
+            state,
+            {**filled, "symbol": candidate.symbol, "id": order_id},
             limit_price,
-        )
-
-        state.option_symbol = (
-            candidate.symbol
-        )
-
-        state.option_type = "put"
-        state.entry_premium = avg
-        state.assignment_basis = None
-        state.phase = "CASH_PUT"
-        state.contracts = 1
-        state.last_order_id = order_id
-        state.expected_shares = 0
-
-        self.store.save(
-            self.state
         )
 
         LOGGER.info(
@@ -3553,6 +3760,38 @@ class WheelStrategy:
             )
             return
 
+        # A short call held across an ex-dividend date can be assigned early,
+        # just before it, losing the shares and the dividend. So only sell
+        # calls that expire before the next ex-dividend date.
+        latest_expiration: Optional[date] = None
+
+        if self.config.wheel_dividend_check:
+            lookup_ok, next_ex = self.earnings.next_ex_dividend(symbol)
+
+            if not lookup_ok:
+                LOGGER.info(
+                    "Covered call skipped for %s: "
+                    "ex-dividend date unavailable.",
+                    symbol,
+                )
+                return
+
+            if next_ex is not None:
+                latest_expiration = next_ex - timedelta(days=1)
+                soonest = date_today() + timedelta(
+                    days=self.config.wheel_min_dte
+                )
+
+                if latest_expiration < soonest:
+                    LOGGER.info(
+                        "Covered call skipped for %s: ex-dividend date %s "
+                        "falls inside the %d-day minimum.",
+                        symbol,
+                        next_ex.isoformat(),
+                        self.config.wheel_min_dte,
+                    )
+                    return
+
         underlying = self.stock_price(
             symbol
         )
@@ -3562,6 +3801,7 @@ class WheelStrategy:
             "call",
             underlying,
             minimum_strike=state.assignment_basis,
+            latest_expiration=latest_expiration,
         )
 
         if (
@@ -3577,16 +3817,17 @@ class WheelStrategy:
             candidate.midpoint
         )
 
+        client_order_id = f"wheel-call-{symbol}-{int(time.time())}"
+        state.pending_client_order_id = client_order_id
+        self.store.save(self.state)
+
         order = self.api.submit_option_order(
             symbol=candidate.symbol,
             qty=1,
             side="sell",
             position_intent="sell_to_open",
             limit_price=limit_price,
-            client_order_id=(
-                f"wheel-call-{symbol}-"
-                f"{int(time.time())}"
-            ),
+            client_order_id=client_order_id,
         )
 
         order_id = str(
@@ -3594,6 +3835,8 @@ class WheelStrategy:
         )
 
         if order.get("status") == "dry_run":
+            state.pending_client_order_id = None
+            self.store.save(self.state)
             LOGGER.warning(
                 "DRY RUN: would sell call %s strike=%.2f basis=%.2f "
                 "DTE=%d delta=%.3f at %.2f",
@@ -3611,30 +3854,13 @@ class WheelStrategy:
         )
 
         if not filled:
+            # See open_csp: recover_pending_order settles it next cycle.
             return
 
-        avg = as_float(
-            filled.get(
-                "filled_avg_price"
-            ),
+        avg = self.record_opened_option(
+            state,
+            {**filled, "symbol": candidate.symbol, "id": order_id},
             limit_price,
-        )
-
-        state.option_symbol = (
-            candidate.symbol
-        )
-
-        state.option_type = "call"
-        state.entry_premium = avg
-        state.phase = "COVERED_CALL"
-        state.contracts = 1
-        state.expected_shares = (
-            self.config.wheel_contract_size
-        )
-        state.last_order_id = order_id
-
-        self.store.save(
-            self.state
         )
 
         LOGGER.info(
@@ -4055,6 +4281,30 @@ class WheelStrategy:
         )
 
         if state.option_symbol:
+            return
+
+        if self.recover_pending_order(symbol):
+            return
+
+        positions = self.api.get_positions()
+
+        unknown = self.unknown_short_option(positions, symbol)
+        if unknown:
+            LOGGER.warning(
+                "Wheel %s: the broker holds short %s, which the record doesn't "
+                "show. Opening nothing until someone reviews it.",
+                symbol,
+                unknown,
+            )
+            self.alerter.send(
+                subject=f"Unknown short option on {symbol}",
+                body=(
+                    f"The broker holds short {unknown}, but the engine's record "
+                    f"shows no open leg for {symbol}. It will not sell another "
+                    "until this is reviewed."
+                ),
+                key=f"wheel-unknown-option-{symbol}",
+            )
             return
 
         shares = position_qty(
