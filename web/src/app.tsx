@@ -181,12 +181,16 @@ function App() {
           </div>
         )}
 
+        {/* Fixed to the screen: the buttons that can fail are far down the page. */}
         {actionError && (
-          <div className="banner danger">
+          <div className="banner danger action-error" role="alert">
             <div>
               <strong>Action failed</strong>
               {actionError}
             </div>
+            <button className="link-btn" onClick={() => setActionError(null)}>
+              Dismiss
+            </button>
           </div>
         )}
 
@@ -279,6 +283,7 @@ function App() {
                 className="btn primary"
                 onClick={() => {
                   setManualOrderResult(null);
+                  setActionError(null);
                   setModal("manual-order");
                 }}
               >
@@ -304,7 +309,13 @@ function App() {
         />
       )}
       {modal === "manual-order" && (
-        <ManualOrderModal busy={manualOrderBusy} result={manualOrderResult} onSubmit={handleManualOrder} onClose={closeModal} />
+        <ManualOrderModal
+          busy={manualOrderBusy}
+          result={manualOrderResult}
+          error={actionError}
+          onSubmit={handleManualOrder}
+          onClose={closeModal}
+        />
       )}
     </>
   );
