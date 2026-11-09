@@ -14,6 +14,7 @@ safe to do so."
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -161,6 +162,26 @@ def submit_manual_order(req: ManualOrderRequest) -> ManualOrderResponse:
 
     if req.side not in ("buy", "sell"):
         return ManualOrderResponse(accepted=False, reason="side must be 'buy' or 'sell'.")
+
+    if req.order_type not in ("market", "limit"):
+        return ManualOrderResponse(accepted=False, reason="order_type must be 'market' or 'limit'.")
+
+    # A negative quantity makes a negative notional, which passes every
+    # exposure cap, and int() below would turn 0.5 into 0.
+    if not math.isfinite(req.qty) or req.qty <= 0 or req.qty != int(req.qty):
+        return ManualOrderResponse(accepted=False, reason="qty must be a whole number above 0.")
+
+    if req.limit_price is not None and (not math.isfinite(req.limit_price) or req.limit_price <= 0):
+        return ManualOrderResponse(accepted=False, reason="limit_price must be above 0.")
+
+    if req.order_type == "limit" and req.limit_price is None:
+        return ManualOrderResponse(accepted=False, reason="limit_price is required for a limit order.")
+
+    # find_position matches exactly, so "aapl" would miss an existing AAPL
+    # position and be treated as new exposure.
+    req = req.model_copy(update={"symbol": req.symbol.strip().upper()})
+    if not req.symbol:
+        return ManualOrderResponse(accepted=False, reason="symbol is required.")
 
     client = deps.get_alpaca_client()
     state = deps.load_state()

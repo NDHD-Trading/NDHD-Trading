@@ -46,6 +46,16 @@ test.describe("connection", () => {
     await expect(page.locator("footer")).toContainText("Last error: Alpaca is unhappy");
   });
 
+  test("clears the error once that tier works again", async ({ page, dashboard }) => {
+    await dashboard.open();
+    dashboard.send({ type: "error", tier: "fast", message: "Alpaca is unhappy" });
+    await expect(page.locator("footer")).toContainText("Last error: Alpaca is unhappy");
+    dashboard.send(data.strategy);
+    await expect(page.locator("footer")).toContainText("Last error: Alpaca is unhappy");
+    dashboard.send(data.tick);
+    await expect(page.locator("footer")).not.toContainText("Last error");
+  });
+
   test("ignores a malformed message and keeps working", async ({ page, dashboard }) => {
     await dashboard.open();
     dashboard.sockets[0].send("this is not json");
@@ -277,21 +287,34 @@ test.describe("on a phone", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
-  test("KNOWN BUG: the dashboard page doesn't scroll sideways", async ({ page, dashboard }) => {
-    // The page is about 696 px wide on a 390 px phone: the top bar doesn't
-    // wrap, and wide tables have no scroll wrapper. Remove test.fail when fixed.
-    test.fail();
+  test("the dashboard page doesn't scroll sideways", async ({ page, dashboard }) => {
     await dashboard.open();
     await expect(dashboard.card("Positions")).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
-  test("KNOWN BUG: the kill switch is on screen", async ({ dashboard }) => {
-    // It sits about 100 px past the right edge, so you have to scroll sideways
-    // to find it. Settings and Sign out are also pushed off. Remove test.fail when fixed.
-    test.fail();
+  test("the kill switch, Settings and Sign out are on screen", async ({ dashboard }) => {
     await dashboard.open();
-    await expect(dashboard.killSwitchButton).toBeInViewport();
+    await expect(dashboard.killSwitchButton).toBeInViewport({ ratio: 1 });
+    await expect(dashboard.topBar.getByTitle("Settings")).toBeInViewport({ ratio: 1 });
+    await expect(dashboard.topBar.getByRole("button", { name: "Sign out" })).toBeInViewport({ ratio: 1 });
+  });
+
+  test("the kill switch stays on screen after scrolling down", async ({ page, dashboard }) => {
+    await dashboard.open();
+    await page.locator("footer").scrollIntoViewIfNeeded();
+    await expect(dashboard.killSwitchButton).toBeInViewport({ ratio: 1 });
+  });
+});
+
+test.describe("on a tablet", () => {
+  test.use({ viewport: { width: 768, height: 1024 } });
+
+  test("the dashboard page doesn't scroll sideways", async ({ page, dashboard }) => {
+    await dashboard.open();
+    await expect(dashboard.card("Positions")).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
   });
 });

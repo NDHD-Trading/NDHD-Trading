@@ -142,12 +142,7 @@ test.describe("what the API enforces", () => {
 
 test.describe("when the broker can't be reached", () => {
   // This server has no broker, which looks just like an Alpaca outage to the page.
-  test("KNOWN BUG: the live connection stays up and reports the problem", async ({ page, dashboard }) => {
-    // The first snapshot in api/main.py ws_endpoint isn't guarded, so a broker
-    // error kills the socket (close 1006) right after it opens. The page then
-    // retries forever: it says "Reconnecting…", the console stays empty and the
-    // real error never shows. Remove test.fail when fixed.
-    test.fail();
+  test("the live connection stays up and reports the problem", async ({ page, dashboard }) => {
     await dashboard.signIn();
     await page.goto("/");
     await expect(page.locator("footer")).toContainText("Last error:", { timeout: 15_000 });
@@ -177,6 +172,25 @@ test.describe("the test server is cut off from the broker", () => {
     expect((await request.post("/api/orders", { headers, data: order })).status()).toBe(503);
     expect((await request.post("/api/kill-switch", { headers })).status()).toBe(503);
     expect((await request.post("/api/positions/AAPL/close", { headers })).status()).toBe(503);
+  });
+
+  test("the API refuses a bad manual order before it needs a broker", async ({ request }) => {
+    const headers = { "X-API-Key": TEST_API_KEY };
+    const order = { symbol: "AAPL", asset_class: "equity", side: "buy", qty: 1, confirm: true };
+    const cases: [object, string][] = [
+      [{ qty: 0 }, "qty must be a whole number"],
+      [{ qty: -5 }, "qty must be a whole number"],
+      [{ qty: 0.5 }, "qty must be a whole number"],
+      [{ order_type: "stop" }, "order_type must be"],
+      [{ order_type: "limit" }, "limit_price is required"],
+      [{ order_type: "limit", limit_price: -1 }, "limit_price must be above 0"],
+      [{ symbol: "   " }, "symbol is required"],
+    ];
+    for (const [change, reason] of cases) {
+      const body = await (await request.post("/api/orders", { headers, data: { ...order, ...change } })).json();
+      expect(body.accepted, JSON.stringify(change)).toBe(false);
+      expect(body.reason, JSON.stringify(change)).toContain(reason);
+    }
   });
 
   test("the steps that would change real files are switched off", async ({ request }) => {

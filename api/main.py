@@ -139,10 +139,22 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     try:
         # Send an immediate full snapshot so the UI doesn't sit blank
         # until the next scheduled tick (only the parts this role may see).
-        if "account" in principal.sections:
-            await ws.manager.send(websocket, await run_in_threadpool(ws.build_fast_snapshot))
-        if "strategy" in principal.sections:
-            await ws.manager.send(websocket, await run_in_threadpool(ws.build_strategy_snapshot))
+        # A broker error here must not end the connection: the page would
+        # show "Reconnecting" forever and never see the error or the log. It
+        # gets the same "error" message a failed scheduled tick sends.
+        first_snapshots = (
+            ("account", "fast", ws.build_fast_snapshot),
+            ("strategy", "strategy", ws.build_strategy_snapshot),
+        )
+        for section, tier, build in first_snapshots:
+            if section not in principal.sections:
+                continue
+            try:
+                snapshot = await run_in_threadpool(build)
+            except Exception as exc:  # noqa: BLE001 - keep the connection alive
+                LOGGER.warning("WS first %s snapshot failed: %s", tier, exc)
+                snapshot = {"type": "error", "tier": tier, "message": str(exc)}
+            await ws.manager.send(websocket, snapshot)
         backlog = await run_in_threadpool(logs.read_tail, 200)
         if backlog:
             await ws.manager.send(websocket, {"type": "log", "entries": backlog, "backlog": True})

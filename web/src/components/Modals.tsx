@@ -80,9 +80,11 @@ interface ManualOrderProps {
   onClose: () => void;
   busy: boolean;
   result: ManualOrderResult | null;
+  /** The request itself failed (network, broker down): shown here, or it's hidden behind this form. */
+  error: string | null;
 }
 
-export function ManualOrderModal({ onSubmit, onClose, busy, result }: ManualOrderProps) {
+export function ManualOrderModal({ onSubmit, onClose, busy, result, error }: ManualOrderProps) {
   const [form, setForm] = useState<OrderForm>({
     symbol: "",
     asset_class: "equity",
@@ -102,8 +104,13 @@ export function ManualOrderModal({ onSubmit, onClose, busy, result }: ManualOrde
       setForm((f) => ({ ...f, [key]: value as OrderForm[K] }));
     };
 
-  const canSubmit = Boolean(form.symbol && form.qty && form.confirm && !busy);
   const isOption = form.asset_class === "option";
+  const symbol = form.symbol.trim().toUpperCase();
+  const qty = Number(form.qty);
+  const qtyProblem = form.qty !== "" && !(Number.isInteger(qty) && qty > 0);
+  const needsLimit = form.order_type === "limit" || isOption;
+  const limitOk = !needsLimit || Number(form.limit_price) > 0;
+  const canSubmit = Boolean(symbol && form.qty && !qtyProblem && limitOk && form.confirm && !busy);
 
   return (
     <ModalShell onClose={onClose}>
@@ -152,6 +159,7 @@ export function ManualOrderModal({ onSubmit, onClose, busy, result }: ManualOrde
         <div>
           <label>Qty</label>
           <input type="number" value={form.qty} onChange={set("qty")} />
+          {qtyProblem && <div className="neg small">Enter a whole number above 0.</div>}
         </div>
         <div>
           <label>Order type</label>
@@ -162,7 +170,7 @@ export function ManualOrderModal({ onSubmit, onClose, busy, result }: ManualOrde
         </div>
       </div>
 
-      {(form.order_type === "limit" || isOption) && (
+      {needsLimit && (
         <div className="field">
           <label>Limit price {isOption && "(required for options)"}</label>
           <input type="number" step="0.01" value={form.limit_price} onChange={set("limit_price")} />
@@ -187,6 +195,15 @@ export function ManualOrderModal({ onSubmit, onClose, busy, result }: ManualOrde
         </div>
       )}
 
+      {error && (
+        <div className="banner danger">
+          <div>
+            <strong>Request failed</strong>
+            {error} Check Open orders before trying again: the order may or may not have reached the broker.
+          </div>
+        </div>
+      )}
+
       <div className="actions">
         <button className="btn" onClick={onClose}>Close</button>
         <button
@@ -194,12 +211,12 @@ export function ManualOrderModal({ onSubmit, onClose, busy, result }: ManualOrde
           disabled={!canSubmit}
           onClick={() =>
             onSubmit({
-              symbol: form.symbol,
+              symbol,
               asset_class: form.asset_class,
               side: form.side,
-              qty: Number(form.qty),
+              qty,
               order_type: form.order_type,
-              limit_price: form.limit_price ? Number(form.limit_price) : null,
+              limit_price: needsLimit && form.limit_price ? Number(form.limit_price) : null,
               position_intent: isOption ? form.position_intent : null,
               confirm: form.confirm,
             })

@@ -60,7 +60,7 @@ If a live test fails, Playwright still writes a text snapshot of the page to
 
 ## Known bugs
 
-A test named `KNOWN BUG: ...` describes the correct behaviour and is marked
-`test.fail()`, because the app doesn't do that yet. These count as passing. Once
-the bug is fixed, the test reports "expected to fail but passed": remove its
-`test.fail()` line and it becomes a normal regression test.
+There are none at the moment. To record one, name the test `KNOWN BUG: ...`, have
+it describe the correct behaviour, and mark it `test.fail()`. It then counts as
+passing until the bug is fixed, when it reports "expected to fail but passed":
+remove the `test.fail()` line and it becomes a normal regression test.
